@@ -3,6 +3,7 @@ import requests
 import numpy as np
 from datetime import date
 import pickle
+pickle.HIGHEST_PROTOCOL = 4
 import os
 import glob
 import pandas as pd
@@ -16,6 +17,9 @@ import yagmail
 timestamp = str(date.today()).replace("-","_")
 path = os.getcwd()
 
+print("Getting the scrape on for {}.".format(timestamp))
+
+# grabbing raw text from the web
 def get_text(url= "https://visionfund.com/team"):
 
     """
@@ -31,6 +35,7 @@ def get_text(url= "https://visionfund.com/team"):
     split_text = [entry.text.splitlines()[1:] for entry in team]
     return split_text
 
+# parse string from the web into a dictionary
 def dict_from_text(text, verbose=False):
 
     """
@@ -39,6 +44,8 @@ def dict_from_text(text, verbose=False):
     OUTPUT: return a dictionary with keys for names, titles and regions
 
     """
+
+    # feels safe to hardcode this
     regions = ['americas', 'asia', 'emea', "global"]
 
     # custom print function for when the verbose flag is True
@@ -52,7 +59,7 @@ def dict_from_text(text, verbose=False):
         vf_team["names"].append(entry[0])
         verboseprint("Looking at {}".format(entry[0]))
 
-        # split the remain items by comma
+        # split the remaining items by comma
         split_items = entry[1].split(',')
         verboseprint("Split items: {}".format(split_items))
 
@@ -89,11 +96,11 @@ def dict_from_text(text, verbose=False):
 
 
 
-        # check that the list isn't empty before adding
+        # check that the title list isn't empty before adding
         if inner_title_list:
             vf_team["titles"].append(inner_title_list)
 
-        # check that the list isn't empty before adding
+        # check that the region list isn't empty before adding
         if inner_region_list:
             vf_team["regions"].append(inner_region_list)
         # assignd None to bios without region
@@ -107,13 +114,19 @@ def dict_from_text(text, verbose=False):
 
 split_text = get_text()
 vf_team = dict_from_text(split_text)
+
+# save a dict copy for future refernce
 with open(path + "/text_dicts/{}".format(timestamp), 'wb') as handle:
     pickle.dump(vf_team, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 raw_df = pd.DataFrame.from_dict(vf_team)
+print("Team member count: {}.".format(len(raw_df.index)))
+
+# save a DataFrame copy for future refernce
 raw_df.to_pickle(path + "/scrape_df/{}".format(timestamp))
 
 
+# find the most recent  two DataFrames for comparison
 def find_old (timestamp, path):
 
     """
@@ -129,12 +142,13 @@ def find_old (timestamp, path):
 
     return (old, new)
 
+# find people who quit and those who joined
 def find_departures_additions (old_df, new_df, new_date):
 
     """
 
     INPUT: current and previous DataFrames, assumes they contain some changes
-    OUTPUT: stacked df of personelle changes
+    OUTPUT: stacked df of changes
 
     """
 
@@ -144,7 +158,9 @@ def find_departures_additions (old_df, new_df, new_date):
     additions = list(set(new_names) - set(old_names))
     departures = list(set(old_names) - set(new_names))
 
+    # filter the old list for departures
     quit_df = old_df[old_df["names"].isin(departures)] if departures else pd.DataFrame()
+    # filter the new list for additions
     joined_df = new_df[new_df["names"].isin(additions)] if additions else pd.DataFrame()
 
     quit_df.set_index([["quit"]*len(quit_df)], inplace=True)
@@ -159,6 +175,7 @@ def find_departures_additions (old_df, new_df, new_date):
 
     return quit_joined_stack
 
+# does what it says on the can
 def find_titles_regions (old_df, new_df, new_date):
 
     """
@@ -174,8 +191,8 @@ def find_titles_regions (old_df, new_df, new_date):
     additions = list(set(new_names) - set(old_names))
     departures = list(set(old_names) - set(new_names))
 
-    old_cleaned = old_df[~old["names"].isin(departures)] if departures else old_df
-    new_cleaned = new_df[~new["names"].isin(additions)] if additions else new_df
+    old_cleaned = old_df[~old_df["names"].isin(departures)] if departures else old_df
+    new_cleaned = new_df[~new_df["names"].isin(additions)] if additions else new_df
 
     old_cleaned = old_cleaned.rename(columns = {"titles":"old_titles", "regions":"old_regions"})
     new_cleaned = new_cleaned.rename(columns = {"titles":"new_titles", "regions":"new_regions"})
@@ -202,12 +219,14 @@ def find_titles_regions (old_df, new_df, new_date):
 
     return titles_regions_stack
 
+
+# does what is says on the can
 def create_report (old_df, new_df, new_date, path):
 
     """
 
     INPUT: current and previous DataFrames and most recent date, pwd path
-    OUTPUT: 4 html change reports -- personelle, title/region and respecitve logs
+    OUTPUT: 4 html change reports -- personnel, title/region and respecitve logs
 
     """
 
@@ -219,22 +238,22 @@ def create_report (old_df, new_df, new_date, path):
 
     if not quit_joined_stack.empty:
 
-        previous_personelle_log = pd.read_pickle(path + "/change_logs/personelle_log")
-        updated_personelle_log = previous_personelle_log.append(quit_joined_stack)
-        updated_personelle_log.to_pickle(path + "/change_logs/personelle_log")
+        previous_personnel_log = pd.read_pickle(path + "/change_logs/personnel_log")
+        updated_personnel_log = previous_personnel_log.append(quit_joined_stack)
+        updated_personnel_log.to_pickle(path + "/change_logs/personnel_log")
 
-        html_personelle = quit_joined_stack.to_html()
-        html_updated_personelle_log = updated_personelle_log.to_html()
-        file_name = path + "/html_reports/personelle_changes_{}.html".format(new_date)
+        html_personnel = quit_joined_stack.to_html()
+        html_updated_personnel_log = updated_personnel_log.to_html()
+        file_name = path + "/html_reports/personnel_changes_{}.html".format(new_date)
         html_file = open(file_name, "w")
-        html_file.write(html_updated_personelle_log)
+        html_file.write(html_updated_personnel_log)
         html_file.close()
 
-        report_list.append(file_name, html_updated_personelle_log)
-        message += "Found changes in personelle.\n"
+        report_list.append(file_name, html_updated_personnel_log)
+        message += "BINGO! Found changes in personnel.\n"
 
     else:
-        message += "Found no changes in personelle.\n"
+        message += "Found no changes in personnel.\n"
 
 
     if not titles_regions_stack.empty:
@@ -251,7 +270,7 @@ def create_report (old_df, new_df, new_date, path):
         text_file.close()
 
         report_list.append(file_name, html_updated_details_log)
-        message += "Found changes in title details.\n"
+        message += "BINGO! Found changes in title details.\n"
 
     else:
         message += "Found no changes in title details.\n"
@@ -259,21 +278,27 @@ def create_report (old_df, new_df, new_date, path):
 
     return (message, report_list)
 
+
 old_df, new_df= find_old(timestamp, path)
 message, report_list = create_report(old_df, new_df, timestamp, path)
 attachment_list = [item for item in report_list if item]
 
+# set this to automatically forward to bloomberg account
 receiver = "pashakun+vf@gmail.com"
 
 yag = yagmail.SMTP("pashakun@gmail.com", oauth2_file="~/secret.json")
 yag.send(
     to=receiver,
     subject="Your Vision Fund scrape results are here.",
-    contents=message,
-    attachments=attachment_list
+    contents=message
+    # some wild "table border" error that needs to be solved
+    # no attachment for now
+    #attachments=attachment_list
 )
 
 file_name = path + "/run_logs/log_{}.html".format(timestamp)
 text_file = open(file_name, "w")
 text_file.write(message)
 text_file.close()
+
+print("Scrape complete. Check your email for results.")
